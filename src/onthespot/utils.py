@@ -2,19 +2,19 @@ import os
 import platform
 import time
 import subprocess
-import requests
-import json
-from hashlib import md5
-from librespot.core import Session
-from .otsconfig import config, config_dir
-from .runtimedata import get_logger
 from io import BytesIO
 import base64
+import json
+from hashlib import md5
+import requests
+from librespot.core import Session
 from PIL import Image
 from mutagen.flac import Picture
 from mutagen.id3 import ID3, ID3NoHeaderError, WOAS, USLT, TCMP, COMM
 from mutagen.oggvorbis import OggVorbis
 import music_tag
+from .otsconfig import config, config_dir
+from .runtimedata import get_logger
 
 logger = get_logger("utils")
 
