@@ -11,10 +11,11 @@ echo " => Fetch Dependencies"
 mkdir build
 cd build
 
-wget https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+wget -c https://github.com/$(wget -q https://github.com/probonopd/go-appimage/releases/expanded_assets/continuous -O - | grep "appimagetool-.*-x86_64.AppImage" | head -n 1 | cut -d '"' -f 2)
+mv appimagetool-*-x86_64.AppImage appimagetool-x86_64.AppImage
 chmod +x appimagetool-x86_64.AppImage
 
-wget https://github.com/niess/python-appimage/releases/download/python3.12/python3.12.7-cp312-cp312-manylinux2014_x86_64.AppImage -O python.AppImage
+curl -L -o python.AppImage https://github.com/niess/python-appimage/releases/download/python3.12/python3.12.7-cp312-cp312-manylinux2014_x86_64.AppImage
 chmod +x python.AppImage
 
 ./python.AppImage --appimage-extract
@@ -31,8 +32,9 @@ cd build/OnTheSpot.AppDir
 ./AppRun -m pip install -r ../../requirements.txt
 ./AppRun -m pip install ../../dist/onthespot-*-py3-none-any.whl
 
-rm AppRun .DirIcon python.png python*.desktop
+rm AppRun .DirIcon python.png python*.desktop usr/share/applications/python*.desktop
 cp -t . ../../src/onthespot/resources/icons/onthespot.png ../../src/onthespot/resources/org.onthespot.OnTheSpot.desktop
+cp ../../src/onthespot/resources/org.onthespot.OnTheSpot.desktop usr/share/applications/org.onthespot.OnTheSpot.desktop
 
 echo '#! /bin/bash
 HERE="$(dirname "$(readlink -f "${0}")")"
@@ -54,7 +56,7 @@ cp $(which ffplay) ../OnTheSpot.AppDir/usr/bin
 echo " => Build OnTheSpot AppImage"
 cd ..
 ./appimagetool-x86_64.AppImage --appimage-extract
-squashfs-root/AppRun OnTheSpot.AppDir
+squashfs-root/AppRun -s deploy OnTheSpot.AppDir/usr/share/applications/*.desktop
 
 mv OnTheSpot-x86_64.AppImage ../dist/OnTheSpot-x86_64.AppImage
 
