@@ -44,7 +44,7 @@ jobs:
           asset_content_type: application/octet-stream
 
   windows-arm64-build:
-    runs-on: [windows-latest, x64]
+    runs-on: [windows-latest, ARM64]
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -140,7 +140,7 @@ jobs:
           asset_content_type: application/gzip
 
   macos-x86_64-build:
-    runs-on: macos-12
+    runs-on: [macos-12, x64]
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -167,7 +167,7 @@ jobs:
           asset_content_type: application/x-apple-diskimage
 
   macos-arm64-build:
-    runs-on: macos-latest
+    runs-on: [macos-latest, ARM64]
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -194,7 +194,7 @@ jobs:
           asset_content_type: application/x-apple-diskimage
 
   appimage-x86_64-build:
-    runs-on: ubuntu-latest
+    runs-on: [ubuntu-latest, x64]
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
