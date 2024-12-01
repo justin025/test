@@ -8,9 +8,10 @@ echo "========= OnTheSpot RPM Build Script ==========="
 
 
 echo " => Build OnTheSpot.whl"
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate
-python -m build
+python3 -m pip install build
+python3 -m build
 
 
 echo " => Build OnTheSpot.rpm"
