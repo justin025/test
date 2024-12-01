@@ -34,9 +34,11 @@ mkdir -p %{buildroot}/usr/bin
 # Install the desktop file
 mkdir -p %{buildroot}/usr/share/applications
 install -m 0644 %{SOURCE1} %{buildroot}/usr/share/applications/
+ls /usr/local/lib/
+ls /usr/local/lib/python3/
 
 %files  
-/usr/local/lib/python3.12/dist-packages/*
+/usr/local/lib/python3/dist-packages/*
 /usr/local/bin/onthespot-cli  
 /usr/local/bin/onthespot-gui  
 /usr/local/bin/onthespot-web  
