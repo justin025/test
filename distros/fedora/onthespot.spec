@@ -26,7 +26,7 @@ A music downloader.
 mkdir -p %{buildroot}/usr/lib/python3/site-packages
 python3 -m pip install --root %{buildroot} --no-deps --ignore-installed %{SOURCE0}
 # Only here because I'm to lazy to write another spec and plan on dropping music-tag
-python3 -m pip install librespot music-tag
+python3 -m pip install --root %{buildroot} --no-deps --ignore-installed librespot music-tag
 
 # Ensure that the executables are installed
 mkdir -p %{buildroot}/usr/bin
@@ -35,11 +35,11 @@ mkdir -p %{buildroot}/usr/bin
 mkdir -p %{buildroot}/usr/share/applications
 install -m 0644 %{SOURCE1} %{buildroot}/usr/share/applications/
 
-%files
-/usr/lib/python3/site-packages/*
-/usr/bin/onthespot-cli
-/usr/bin/onthespot-gui
-/usr/bin/onthespot-web
+%files  
+/usr/local/lib/python3.12/dist-packages/*
+/usr/local/bin/onthespot-cli  
+/usr/local/bin/onthespot-gui  
+/usr/local/bin/onthespot-web  
 /usr/share/applications/org.onthespot.OnTheSpot.desktop
 
 %changelog

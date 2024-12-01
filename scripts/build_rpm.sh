@@ -12,7 +12,7 @@ python3 -m venv venv
 source venv/bin/activate
 python3 -m pip install build
 python3 -m build
-
+deactivate
 
 echo " => Build OnTheSpot.rpm"
 mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
