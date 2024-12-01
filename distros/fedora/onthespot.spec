@@ -36,7 +36,7 @@ mkdir -p %{buildroot}/usr/share/applications
 install -m 0644 %{SOURCE1} %{buildroot}/usr/share/applications/
 
 %files
-%{python3_sitelib}/onthespot*
+/usr/lib/python3/site-packages/*
 /usr/bin/onthespot-cli
 /usr/bin/onthespot-gui
 /usr/bin/onthespot-web
