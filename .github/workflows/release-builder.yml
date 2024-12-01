@@ -170,7 +170,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y rpm python3-pip python3-dev python3-setuptools python3-venv python3-build build-essential
+          sudo apt install -y rpm python3-pip python3-dev python3-setuptools python3-venv python3-build python3-rpm build-essential
 
       - name: Run RPM Build Script
         run: scripts/build_rpm.sh
