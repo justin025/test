@@ -7,9 +7,6 @@ Source0:        onthespot-1.0.3-py3-none-any.whl
 Source1:        org.onthespot.OnTheSpot.desktop
 BuildArch:      noarch
 
-BuildRequires: python3-devel
-BuildRequires: python3-pip
-
 Requires: python3-flask
 Requires: python3-mutagen
 Requires: python3-pillow
