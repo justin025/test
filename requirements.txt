@@ -1,0 +1,11 @@
+Flask
+librespot
+music-tag
+mutagen
+Pillow
+pyperclip
+PyQt6
+PyQt6_sip
+Requests
+urllib3
+yt-dlp
