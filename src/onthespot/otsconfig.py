@@ -1,6 +1,5 @@
 import os
 import json
-import shutil
 from shutil import which
 import uuid
 
@@ -17,6 +16,7 @@ def config_dir():
             return os.environ["XDG_CONFIG_HOME"]
         else:
             return os.path.join(os.path.expanduser("~"), ".config")
+
 
 def cache_dir():
     if os.name == "nt":
@@ -49,6 +49,7 @@ class Config:
             "download_root": os.path.join(os.path.expanduser("~"), "Music", "OnTheSpot"), # Root dir for downloads
             "download_delay": 3, # Seconds to wait before next download attempt
             "maximum_download_workers": 1, # Maximum number of download workers
+            "maximum_queue_workers": 1, # Maximum number of queue workers
             "track_path_formatter": "Tracks" + os.path.sep + "{album_artist}" + os.path.sep + "[{year}] {album}" + os.path.sep + "{track_number}. {name}", # Track path format string
             "podcast_path_formatter": "Episodes" + os.path.sep + "{album}" + os.path.sep + "{name}", # Episode path format string
             "playlist_path_formatter": "Playlists" + os.path.sep + "{playlist_name} by {playlist_owner}" + os.path.sep + "{name} - {artist}", # Playlist path format string
@@ -82,7 +83,7 @@ class Config:
             "enable_search_shows": True, # Enable listed category in search
             "enable_search_audiobooks": True, # Enable listed category in search
             "show_search_thumbnails": True, # Show thumbnails in search view
-            "show_download_thumbnails": True, # Show thumbnails in download view
+            "show_download_thumbnails": False, # Show thumbnails in download view
             "explicit_label": "🅴", # Explicit label in app and download path
             "search_thumb_height": 60, # Thumbnail height ( they are of equal width and height )
             "metadata_seperator": "; ", # Seperator used for metadata fields that have multiple values
@@ -132,6 +133,11 @@ class Config:
             "theme": "dark", # Light\Dark
             "accounts": [
                 {
+                    "uuid": "public_bandcamp",
+                    "service": "bandcamp",
+                    "active": True,
+                },
+                {
                     "uuid": "public_soundcloud",
                     "service": "soundcloud",
                     "active": True,
@@ -145,7 +151,7 @@ class Config:
                     "uuid": "public_youtube",
                     "service": "youtube",
                     "active": True,
-                }
+                },
             ] # Saved account information
         }
         if os.path.isfile(self.__cfg_path):
@@ -223,6 +229,7 @@ class Config:
                 os.path.dirname(self.get("_log_file")), exist_ok=True
                 )
 
+
     def get(self, key, default=None):
         if key in self.__config:
             return self.__config[key]
@@ -231,12 +238,14 @@ class Config:
         else:
             return default
 
+
     def set_(self, key, value):
         if type(value) in [list, dict]:
             self.__config[key] = value.copy()
         else:
             self.__config[key] = value
         return value
+
 
     def update(self):
         os.makedirs(os.path.dirname(self.__cfg_path), exist_ok=True)
@@ -245,6 +254,7 @@ class Config:
                 self.set_(key, self.__template_data[key])
         with open(self.__cfg_path, "w") as cf:
             cf.write(json.dumps(self.__config, indent=4))
+
 
     def rollback(self):
         with open(self.__cfg_path, "w") as cf:

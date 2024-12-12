@@ -9,9 +9,11 @@ from .otsconfig import config_dir, config
 from .accounts import FillAccountPool, get_account_token
 from .parse_item import parsingworker, parse_url
 from .search import get_search_results
+from .api.bandcamp import bandcamp_get_track_metadata
 from .api.deezer import deezer_get_track_metadata, deezer_add_account
 from .api.soundcloud import soundcloud_get_track_metadata
 from .api.spotify import MirrorSpotifyPlayback, spotify_new_session, spotify_get_track_metadata, spotify_get_episode_metadata
+from .api.tidal import tidal_get_track_metadata
 from .api.youtube import youtube_get_track_metadata
 from .downloader import DownloadWorker
 from .casualsnek import start_snake_game
@@ -30,27 +32,28 @@ class QueueWorker(threading.Thread):
                 local_id = next(iter(pending))
                 with pending_lock:
                     item = pending.pop(local_id)
-                token = get_account_token()
+                token = get_account_token(item['item_service'])
                 item_metadata = globals()[f"{item['item_service']}_get_{item['item_type']}_metadata"](token, item['item_id'])
-
-                with download_queue_lock:
-                    download_queue[local_id] = {
-                        'local_id': local_id,
-                        'available': True,
-                        "item_service": item["item_service"],
-                        "item_type": item["item_type"],
-                        'item_id': item['item_id'],
-                        'item_status': 'Waiting',
-                        "file_path": None,
-                        "item_name": item_metadata["title"],
-                        "item_by": item_metadata["artists"],
-                        'parent_category': item['parent_category'],
-                        'playlist_name': item.get('playlist_name', ''),
-                        'playlist_by': item.get('playlist_by', ''),
-                        'playlist_number': item.get('playlist_number', '')
-                        }
+                if item_metadata:
+                    with download_queue_lock:
+                        download_queue[local_id] = {
+                            'local_id': local_id,
+                            'available': True,
+                            "item_service": item["item_service"],
+                            "item_type": item["item_type"],
+                            'item_id': item['item_id'],
+                            'item_status': 'Waiting',
+                            "file_path": None,
+                            "item_name": item_metadata["title"],
+                            "item_by": item_metadata["artists"],
+                            'parent_category': item['parent_category'],
+                            'playlist_name': item.get('playlist_name', ''),
+                            'playlist_by': item.get('playlist_by', ''),
+                            'playlist_number': item.get('playlist_number', '')
+                            }
             else:
                 time.sleep(0.2)
+
 
 def main():
     print('\033[32mLogging In...\033[0m\n', end='', flush=True)
@@ -66,8 +69,9 @@ def main():
     thread.daemon = True
     thread.start()
 
-    queue_worker = QueueWorker()
-    queue_worker.start()
+    for i in range(config.get('maximum_queue_workers')):
+        queue_worker = QueueWorker()
+        queue_worker.start()
 
     for i in range(config.get('maximum_download_workers')):
         downloadworker = DownloadWorker(gui=True)
@@ -85,7 +89,6 @@ def main():
 class CLI(Cmd):
     intro = '\033[32mWelcome to OnTheSpot. Type help or ? to list commands.\033[0m'
     prompt = '(OTS) '
-
 
     def do_help(self, arg):
         print("\033[32mAvailable commands:\033[0m")
@@ -140,7 +143,6 @@ class CLI(Cmd):
             deezer_add_account(parts[2])
 
         elif len(parts) == 2 and parts[0] == "select_account":
-
             try:
                 account_number = int(parts[1])
                 config.set_('parsing_acc_sn', account_number)
@@ -150,7 +152,6 @@ class CLI(Cmd):
                 print("\033[32mInvalid account number. Please enter a valid integer.\033[0m")
 
         elif len(parts) == 2 and parts[0] == "delete_account":
-
             try:
                 account_number = int(parts[1])
                 accounts = config.get('accounts').copy()
@@ -161,7 +162,6 @@ class CLI(Cmd):
                 print(f"\033[32mDeleted account number: {account_number}\033[0m")
             except ValueError:
                 print("\033[32mInvalid account number. Please enter a valid integer.\033[0m")
-
         else:
             print("\033[32mConfiguration options:\033[0m")
             print("  list_accounts")
@@ -299,12 +299,10 @@ class CLI(Cmd):
         stdscr.refresh()
 
 
-
     def do_exit(self, arg):
         """Exit the CLI application."""
         print("Exiting the CLI application.")
         os._exit(0)
-
 
 
 if __name__ == '__main__':

@@ -1,22 +1,69 @@
 import os
 import platform
-import time
 import subprocess
 from io import BytesIO
 import base64
 import json
 from hashlib import md5
+import ssl
 import requests
-from librespot.core import Session
 from PIL import Image
 from mutagen.flac import Picture
 from mutagen.id3 import ID3, ID3NoHeaderError, WOAS, USLT, TCMP, COMM
 from mutagen.oggvorbis import OggVorbis
 import music_tag
-from .otsconfig import config, config_dir
+from .otsconfig import config
 from .runtimedata import get_logger, pending, download_queue
 
 logger = get_logger("utils")
+
+class SSLAdapter(requests.adapters.HTTPAdapter):
+    def __init__(self, ssl_context, *args, **kwargs):
+        self.ssl_context = ssl_context
+        super().__init__(*args, **kwargs)
+
+    def init_poolmanager(self, *args, **kwargs):
+        context = self.ssl_context
+        return super().init_poolmanager(*args, ssl_context=context, **kwargs)
+
+
+def make_call(url, params=None, headers=None, skip_cache=False, text=False, use_ssl=False):
+    if not skip_cache:
+        request_key = md5(f'{url}'.encode()).hexdigest()
+        req_cache_file = os.path.join(config.get('_cache_dir'), 'reqcache', request_key + '.json')
+        os.makedirs(os.path.dirname(req_cache_file), exist_ok=True)
+        if os.path.isfile(req_cache_file):
+            logger.debug(f'URL "{url}" cache found! HASH: {request_key}')
+            try:
+                with open(req_cache_file, 'r', encoding='utf-8') as cf:
+                    if text:
+                        return cf.read()
+                    json_data = json.load(cf)
+                return json_data
+            except json.JSONDecodeError:
+                logger.error(f'URL "{url}" cache has invalid data, retrying request!')
+                pass
+        logger.debug(f'URL "{url}" has cache miss! HASH: {request_key}; Fetching data')
+
+    session = requests.Session()
+
+    if use_ssl:
+        ctx = ssl.create_default_context()
+        ctx.verify_mode = ssl.CERT_REQUIRED
+        session.mount('https://', SSLAdapter(ssl_context=ctx))
+
+    response = session.get(url, headers=headers, params=params)
+
+    if response.status_code == 200:
+        if not skip_cache:
+            with open(req_cache_file, 'w', encoding='utf-8') as cf:
+                cf.write(response.text)
+        if text:
+            return response.text
+        return json.loads(response.text)
+    else:
+        logger.info(f"Request status error {response.status_code}: {url}")
+        return None
 
 
 def format_local_id(item_id):
@@ -77,31 +124,6 @@ def translate(string):
         return response.json()["sentences"][0]["trans"]
     except (requests.exceptions.RequestException, KeyError, IndexError):
         return string
-
-
-def make_call(url, params=None, headers=None, skip_cache=False):
-    if not skip_cache:
-        request_key = md5(f'{url}'.encode()).hexdigest()
-        req_cache_file = os.path.join(config.get('_cache_dir'), 'reqcache', request_key+'.json')
-        os.makedirs(os.path.dirname(req_cache_file), exist_ok=True)
-        if os.path.isfile(req_cache_file):
-            logger.debug(f'URL "{url}" cache found ! HASH: {request_key}')
-            try:
-                with open(req_cache_file, 'r', encoding='utf-8') as cf:
-                    json_data = json.load(cf)
-                return json_data
-            except json.JSONDecodeError:
-                logger.error(f'URL "{url}" cache has invalid data, retring request !')
-                pass
-        logger.debug(f'URL "{url}" has cache miss ! HASH: {request_key}; Fetching data')
-    response = requests.get(url, headers=headers, params=params)
-    if response.status_code == 200:
-        if not skip_cache:
-            with open(req_cache_file, 'w', encoding='utf-8') as cf:
-                cf.write(response.text)
-        return json.loads(response.text)
-    else:
-        logger.info(f"Request status error {response.status_code}")
 
 
 def conv_list_format(items):
@@ -254,13 +276,16 @@ def embed_metadata(item, metadata):
                     command += ['-metadata', 'disc={}/{}'.format(value, metadata['total_discs'])]
 
             elif key in ['track_number', 'tracknumber'] and config.get("embed_tracknumber"):
-                command += ['-metadata', 'track={}/{}'.format(value, metadata['total_tracks'])]
+                command += ['-metadata', 'track={}/{}'.format(value, metadata.get('total_tracks', ''))]
 
             elif key == 'genre' and config.get("embed_genre"):
                 command += ['-metadata', 'genre={}'.format(value)]
 
             elif key == 'performers' and config.get("embed_performers"):
-                command += ['-metadata', 'performer={}'.format(value)]
+                if filetype == '.mp3':
+                    command += ['-metadata', 'TPE1={}'.format(value)]
+                else:
+                    command += ['-metadata', 'performer={}'.format(value)]
 
             elif key == 'producers' and config.get("embed_producers"):
                 if filetype == '.mp3':
@@ -270,7 +295,7 @@ def embed_metadata(item, metadata):
 
             elif key == 'writers' and config.get("embed_writers"):
                 if filetype == '.mp3':
-                    command += ['-metadata', 'TOLY={}'.format(value)]
+                    command += ['-metadata', 'TEXT={}'.format(value)]
                 else:
                     command += ['-metadata', 'author={}'.format(value)]
 
@@ -334,18 +359,18 @@ def embed_metadata(item, metadata):
                 else:
                     command += ['-metadata', 'website={}'.format(value)]
 
-            elif key == 'explicit' and config.get("embed_explicit"):
-                if filetype == '.mp3':
-                    command += ['-metadata', 'ITUNESADVISORY={}'.format(value)]
-                else:
-                    command += ['-metadata', 'explicit={}'.format(value)]
-
             elif key == 'lyrics' and config.get("embed_lyrics"):
                 if filetype == '.mp3':
                     # Incorrectly embedded to TXXX:USLT, patch sent upstream
                     command += ['-metadata', 'USLT={}'.format(value)]
                 else:
                     command += ['-metadata', 'lyrics={}'.format(value)]
+
+            elif key == 'explicit' and config.get("embed_explicit"):
+                if filetype == '.mp3':
+                    command += ['-metadata', 'ITUNESADVISORY={}'.format(value)]
+                else:
+                    command += ['-metadata', 'explicit={}'.format(value)]
 
             elif key == 'time_signature' and config.get("embed_timesignature"):
                 command += ['-metadata', 'timesignature={}'.format(value)]
@@ -395,9 +420,11 @@ def set_music_thumbnail(filename, metadata):
 
         temp_name = os.path.join(os.path.dirname(target_path), "~" + file_stem + filetype)
 
-        # Fetch thumbnail
         image_path = os.path.join(os.path.dirname(filename), 'cover')
         image_path += "." + config.get("album_cover_format")
+
+        # Fetch thumbnail
+        #if not os.path.isfile(image_path) or (parent_category == 'playlist' and config.get('use_playlist_path')):
         logger.info(f"Fetching item thumbnail")
         img = Image.open(BytesIO(requests.get(metadata['image_url']).content))
         buf = BytesIO()
@@ -502,6 +529,7 @@ def fix_mp3_metadata(filename):
         del id3['TXXX:TCMP']
     id3.save()
 
+
 def add_to_m3u_file(item, item_metadata):
     logger.info(f"Adding {item['file_path']} to m3u")
 
@@ -530,13 +558,13 @@ def add_to_m3u_file(item, item_metadata):
         album_type=item_metadata.get('album_type', 'single').title(),
         name=item_metadata.get('title', ''),
         year=item_metadata.get('release_year', ''),
-        disc_number=item_metadata.get('disc_number', ''),
-        track_number=item_metadata.get('track_number', ''),
+        disc_number=item_metadata.get('disc_number', 1),
+        track_number=item_metadata.get('track_number', 1),
         genre=item_metadata.get('genre', ''),
         label=item_metadata.get('label', ''),
-        explicit=str(config.get('explicit_label')) if item_metadata.get('explicit') else '',
-        trackcount=item_metadata.get('total_tracks', ''),
-        disccount=item_metadata.get('total_discs', ''),
+        explicit=str(config.get('explicit_label')) if item_metadata.get('explicit', '') else '',
+        trackcount=item_metadata.get('total_tracks', 1),
+        disccount=item_metadata.get('total_discs', 1),
         playlist_name=item.get('playlist_name', ''),
         playlist_owner=item.get('playlist_by', ''),
         playlist_number=item.get('playlist_number', ''),
@@ -551,6 +579,7 @@ def add_to_m3u_file(item, item_metadata):
                 m3u_file.write(f"{m3u_item_header}\n{item['file_path']}\n")
         else:
             logger.info(f"{item['file_path']} already exists in the M3U file.")
+
 
 def strip_metadata(item):
     if os.path.isfile(os.path.abspath(item['file_path'])):
@@ -572,9 +601,7 @@ def strip_metadata(item):
         if int(os.environ.get('SHOW_FFMPEG_OUTPUT', 0)) == 0:
             command += ['-loglevel', 'error', '-hide_banner', '-nostats']
 
-        command += ['-c:a', 'copy']
-
-        command += ['-map_metadata', '-1']
+        command += ['-map', '0:a', '-map_metadata', '-1', '-c:a', 'copy']
 
         # Add output parameter at last
         command += [item['file_path']]

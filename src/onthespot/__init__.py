@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QStyle
 from PyQt6.QtGui import QIcon
 from .gui.mainui import MainWindow
 from .gui.minidialog import MiniDialog
-from .runtimedata import get_logger
+from .runtimedata import get_logger, set_init_tray
 from .otsconfig import config
 from .parse_item import parsingworker
 
@@ -22,14 +22,17 @@ class TrayApp:
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.activated.connect(self.tray_icon_clicked)
 
+
     def tray_icon_clicked(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self.show_window()
+
 
     def show_window(self):
         self.main_window.show()
         self.main_window.raise_()
         self.main_window.activateWindow()
+
 
     def quit_application(self):
         QApplication.quit()
@@ -87,6 +90,7 @@ def main():
     window = MainWindow(_dialog, start_url)
 
     if config.get('close_to_tray'):
+        set_init_tray(True)
         tray_app = TrayApp(window)
 
     app.setDesktopFileName('org.onthespot.OnTheSpot')
@@ -94,6 +98,7 @@ def main():
 
     logger.info('Good bye ..')
     os._exit(0)
+
 
 if __name__ == '__main__':
     main()

@@ -4,6 +4,7 @@ import time
 import uuid
 import json
 import threading
+import traceback
 import requests
 from librespot.audio.decoders import AudioQuality
 from librespot.core import Session
@@ -11,7 +12,7 @@ from librespot.zeroconf import ZeroconfServer
 from PyQt6.QtCore import QObject
 from ..otsconfig import config, cache_dir
 from ..runtimedata import get_logger, account_pool, pending, download_queue, pending_lock
-from ..utils import make_call, conv_list_format, format_local_id
+from ..utils import make_call, conv_list_format
 
 logger = get_logger("api.spotify")
 
@@ -64,21 +65,22 @@ class MirrorSpotifyPlayback(QObject):
                         parent_category = 'track'
                         playlist_name = ''
                         playlist_by = ''
-                        if data['context']['type'] == 'playlist':
-                            match = re.search(r'spotify:playlist:(\w+)', data['context']['uri'])
-                            if match:
-                                playlist_id = match.group(1)
-                            else:
-                                continue
-                            token = account_pool[parsing_index]['login']['session'].tokens().get("user-read-email")
-                            playlist_name, playlist_by = spotify_get_playlist_data(token, playlist_id)
-                            parent_category = 'playlist'
-                        elif data['context']['type'] == 'collection':
-                            playlist_name = 'Liked Songs'
-                            playlist_by = 'me'
-                            parent_category = 'playlist'
-                        elif data['context']['type'] in ('album', 'artist'):
-                            parent_category = 'album'
+                        if data['context'] is not None:
+                            if data['context'].get('type', '') == 'playlist':
+                                match = re.search(r'spotify:playlist:(\w+)', data['context']['uri'])
+                                if match:
+                                    playlist_id = match.group(1)
+                                else:
+                                    continue
+                                token = account_pool[parsing_index]['login']['session'].tokens().get("user-read-email")
+                                playlist_name, playlist_by = spotify_get_playlist_data(token, playlist_id)
+                                parent_category = 'playlist'
+                            elif data['context'].get('type', '') == 'collection':
+                                playlist_name = 'Liked Songs'
+                                playlist_by = 'me'
+                                parent_category = 'playlist'
+                            elif data['context'].get('type', '') in ('album', 'artist'):
+                                parent_category = 'album'
                         # Use item id to prevent duplicates
                         #local_id = format_local_id(item_id)
                         with pending_lock:
@@ -125,16 +127,16 @@ def spotify_new_session():
                 return False
             else:
                 # I wish there was a way to get credentials without saving to
-                # a file and parsing it as so
+                # a file and parsing it but not currently sure how.
                 try:
                     with open(session_json_path, 'r') as file:
                         zeroconf_login = json.load(file)
-                except FileNotFoundError:
-                    print(f"Error: The file {session_json_path} was not found.")
-                except json.JSONDecodeError:
-                    print("Error: Failed to decode JSON from the file.")
+                except FileNotFoundError as e:
+                    logger.error(f"Error: {str(e)} The file {session_json_path} was not found.\nTraceback: {traceback.format_exc()}")
+                except json.JSONDecodeError as e:
+                    logger.error(f"Error: {str(e)} Failed to decode JSON from the file.\nTraceback: {traceback.format_exc()}")
                 except Exception as e:
-                    print(f"An error occurred: {e}")
+                    logger.error(f"Unknown Error: {str(e)}\nTraceback: {traceback.format_exc()}")
                 cfg_copy = config.get('accounts').copy()
                 new_user = {
                     "uuid": uuid_uniq,
@@ -157,21 +159,19 @@ def spotify_new_session():
 def spotify_login_user(account):
     try:
         # I'd prefer to use 'Session.Builder().stored(credentials).create but
-        # it seems to be broken, loading from credentials file instead
+        # I can't get it to work, loading from credentials file instead.
         uuid = account['uuid']
         username = account['login']['username']
 
         session_dir = os.path.join(cache_dir(), "onthespot", "sessions")
         os.makedirs(session_dir, exist_ok=True)
         session_json_path = os.path.join(session_dir, f"ots_login_{uuid}.json")
-        print(session_json_path)
         try:
             with open(session_json_path, 'w') as file:
                 json.dump(account['login'], file)
-            print(f"Login information for '{username[:4]}*******' written to {session_json_path}")
+            logger.info(f"Login information for '{username[:4]}*******' written to {session_json_path}")
         except IOError as e:
-            print(f"Error writing to file {session_json_path}: {e}")
-
+            logger.error(f"Error writing to file {session_json_path}: {str(e)}\nTraceback: {traceback.format_exc()}")
 
         config = Session.Configuration.Builder().set_stored_credential_file(session_json_path).build()
         # For some reason initialising session as None prevents premature application exit
@@ -197,7 +197,7 @@ def spotify_login_user(account):
         })
         return True
     except Exception as e:
-        logger.error(f"Unknown Exception: {str(e)}")
+        logger.error(f"Unknown Exception: {str(e)}\nTraceback: {traceback.format_exc()}")
         account_pool.append({
             "uuid": uuid,
             "username": username,
@@ -243,15 +243,19 @@ def spotify_get_token(parsing_index):
     return token
 
 
-def spotify_get_artist_albums(token, artist_id):
-    logger.info(f"Get albums for artist by id '{artist_id}'")
+def spotify_get_artist_album_ids(token, artist_id):
+    logger.info(f"Getting album ids for artist: '{artist_id}'")
     headers = {"Authorization": f"Bearer {token}"}
-    resp = make_call(f'https://api.spotify.com/v1/artists/{artist_id}/albums?include_groups=album%2Csingle&limit=50', headers=headers) #%2Cappears_on%2Ccompilation
-    return [resp['items'][i]['external_urls']['spotify'] for i in range(len(resp['items']))]
+    artist_data = make_call(f'https://api.spotify.com/v1/artists/{artist_id}/albums?include_groups=album%2Csingle&limit=50', headers=headers) #%2Cappears_on%2Ccompilation
+
+    item_ids = []
+    for album in artist_data['items']:
+        item_ids.append(album['id'])
+    return item_ids
 
 
 def spotify_get_playlist_data(token, playlist_id):
-    logger.info(f"Get playlist dump for '{playlist_id}'")
+    logger.info(f"Get playlist data for playlist: {playlist_id}")
     headers = {"Authorization": f"Bearer {token}"}
     resp = make_call(f'https://api.spotify.com/v1/playlists/{playlist_id}', headers=headers, skip_cache=True)
     return resp['name'], resp['owner']['display_name']
@@ -262,11 +266,9 @@ def spotify_get_lyrics(token, item_id, item_type, metadata, filepath):
         lyrics = []
         try:
             if item_type == "track":
-                url = f'https://spclient.wg.spotify.com/color-lyrics/v2/track/{item_id}'
+                url = f'https://spclient.wg.spotify.com/color-lyrics/v2/track/{item_id}?format=json&market=from_token'
             elif item_type == "episode":
-                url = f"https://spclient.wg.spotify.com/transcript-read-along/v2/episode/{item_id}"
-
-            params = 'format=json&market=from_token'
+                url = f"https://spclient.wg.spotify.com/transcript-read-along/v2/episode/{item_id}?format=json&market=from_token"
 
             headers = {
             'app-platform': 'WebPlayer',
@@ -274,7 +276,7 @@ def spotify_get_lyrics(token, item_id, item_type, metadata, filepath):
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3865.90 Safari/537.36"
             }
 
-            resp = make_call(url, headers=headers, params=params)
+            resp = make_call(url, headers=headers)
             if resp == None:
                 logger.info(f"Failed to find lyrics for {item_type}: {item_id}")
                 return None
@@ -312,15 +314,15 @@ def spotify_get_lyrics(token, item_id, item_type, metadata, filepath):
                     digit=""
                 lyrics.append(f'[length:{digit}{round((l_ms/1000)/60)}:{round((l_ms/1000)%60)}]\n')
 
+            default_length = len(lyrics)
+
             if item_type == "track":
                 if resp["lyrics"]["syncType"] == "LINE_SYNCED":
                     for line in resp["lyrics"]["lines"]:
                         minutes, seconds = divmod(int(line['startTimeMs']) / 1000, 60)
                         lyrics.append(f'[{minutes:0>2.0f}:{seconds:05.2f}] {line["words"]}')
-                else:
-                    # It's un synced lyrics, if not forcing synced lyrics return it
-                    if not config.get("only_synced_lyrics"):
-                        lyrics = [line['words'][0]['string'] for line in resp['lines']]
+                elif resp["lyrics"]["syncType"] == "UNSYNCED" and not config.get("only_synced_lyrics"):
+                    lyrics = [line['words'] for line in resp['lyrics']['lines']]
 
             elif item_type == "episode":
                 if resp["timeSyncedStatus"] == "SYLLABLE_SYNCED":
@@ -329,19 +331,18 @@ def spotify_get_lyrics(token, item_id, item_type, metadata, filepath):
                             minutes, seconds = divmod(int(line['startMs']) / 1000, 60)
                             lyrics.append(f'[{minutes:0>2.0f}:{seconds:05.2f}] {line["text"]["sentence"]["text"]}')
                         except KeyError as e:
-                            logger.debug("Invalid line, likely title, skipping..")
-
+                            logger.debug(f"Invalid line: {str(e)} likely title, skipping..")
                 else:
                     logger.info("Unsynced episode lyrics, please open a bug report.")
 
-        except (KeyError, IndexError):
-            logger.error(f'KeyError/Index Error. Failed to get lyrics for track id: {item_id}, ')
+        except (KeyError, IndexError) as e:
+            logger.error(f'KeyError/Index Error. Failed to get lyrics for {item_id}: {str(e)}\nTraceback: {traceback.format_exc()}')
 
         merged_lyrics = '\n'.join(lyrics)
 
         if lyrics:
-            logger.info(lyrics)
-            if len(lyrics) <= 2:
+            logger.debug(lyrics)
+            if len(lyrics) <= default_length:
                 return False
             if config.get('use_lrc_file'):
                 with open(filepath + '.lrc', 'w', encoding='utf-8') as f:
@@ -362,16 +363,12 @@ def spotify_get_playlist_items(token, playlist_id):
     items = []
     offset = 0
     limit = 100
-    url = f'https://api.spotify.com/v1/playlists/{playlist_id}/tracks?additional_types=track%2Cepisode'
 
     while True:
+        url = f'https://api.spotify.com/v1/playlists/{playlist_id}/tracks?additional_types=track%2Cepisode&offset={offset}&limit={limit}'
         headers = {'Authorization': f'Bearer {token}'}
-        params = {
-            'limit': limit,
-            'offset': offset
-            }
 
-        resp = make_call(url, headers=headers, params=params, skip_cache=True)
+        resp = make_call(url, headers=headers, skip_cache=True)
 
         offset += limit
         items.extend(resp['items'])
@@ -388,16 +385,11 @@ def spotify_get_liked_songs(token):
     limit = 50
     token = account_pool[config.get('parsing_acc_sn')]['login']['session'].tokens().get("user-library-read")
 
-    url = f'https://api.spotify.com/v1/me/tracks'
-
     while True:
+        url = f'https://api.spotify.com/v1/me/tracks?offset={offset}&limit={limit}'
         headers = {'Authorization': f'Bearer {token}'}
-        params = {
-            'limit': limit,
-            'offset': offset
-            }
 
-        resp = make_call(url, headers=headers, params=params, skip_cache=True)
+        resp = make_call(url, headers=headers, skip_cache=True)
 
         offset += limit
         items.extend(resp['items'])
@@ -413,16 +405,12 @@ def spotify_get_your_episodes(token):
     offset = 0
     limit = 50
     token = account_pool[config.get('parsing_acc_sn')]['login']['session'].tokens().get("user-library-read")
-    url = f'https://api.spotify.com/v1/me/shows'
 
     while True:
+        url = f'https://api.spotify.com/v1/me/episodes?offset={offset}&limit={limit}'
         headers = {'Authorization': f'Bearer {token}'}
-        params = {
-            'limit': limit,
-            'offset': offset
-            }
 
-        resp = make_call(url, headers=headers, params=params, skip_cache=True)
+        resp = make_call(url, headers=headers, skip_cache=True)
 
         offset += limit
         items.extend(resp['items'])
@@ -448,32 +436,27 @@ def get_album_name(token, album_id):
             resp['total_tracks']
 
 
-def spotify_get_album_tracks(token, album_id):
-    logger.info(f"Get tracks from album by id '{album_id}'")
-    songs = []
+def spotify_get_album_track_ids(token, album_id):
+    logger.info(f"Getting tracks from album: {album_id}")
+    tracks = []
     offset = 0
     limit = 50
-    include_groups = 'album,compilation'
 
     while True:
+        url=f'https://api.spotify.com/v1/albums/{album_id}/tracks?offset={offset}&limit={limit}'
         headers = {"Authorization": f"Bearer {token}"}
-        params = {
-            'limit': limit,
-            'include_groups': include_groups,
-            'offset': offset
-            }
-        resp = make_call(
-            f'https://api.spotify.com/v1/albums/{album_id}/tracks',
-            headers=headers,
-            params=params
-            )
+        resp = make_call(url, headers=headers)
 
         offset += limit
-        songs.extend(resp['items'])
+        tracks.extend(resp['items'])
 
         if resp['total'] <= offset:
             break
-    return songs
+
+    item_ids = []
+    for track in tracks:
+        item_ids.append(track['id'])
+    return item_ids
 
 
 def spotify_get_search_results(token, search_term, content_types):
@@ -550,8 +533,6 @@ def spotify_get_track_metadata(token, item_id):
     album_data = make_call(track_data['tracks'][0]['album']['href'], headers=headers)
     artist_data = make_call(track_data['tracks'][0]['artists'][0]['href'], headers=headers)
 
-    info = {}
-
     artists = []
     for data in track_data.get('tracks', [{}])[0].get('artists', []):
         artists.append(data.get('name', ''))
@@ -564,6 +545,7 @@ def spotify_get_track_metadata(token, item_id):
             artist.get('name', '') for artist in credit_block.get('artists', [])
         ]
 
+    info = {}
     info['artists'] = artists
     info['album_name'] = track_data.get('tracks', [{}])[0].get('album', {}).get("name", '')
     info['album_type'] = album_data.get('album_type', '')
@@ -580,9 +562,7 @@ def spotify_get_track_metadata(token, item_id):
     info['track_number'] = track_data.get('tracks', [{}])[0].get('track_number', '')
     info['total_tracks'] = track_data.get('tracks', [{}])[0].get('album', {}).get('total_tracks', '')
     info['disc_number'] = track_data.get('tracks', [{}])[0].get('disc_number', '')
-
     info['total_discs'] = sorted([trk.get('disc_number', 0) for trk in album_data.get('tracks', {}).get('items', [])])[-1] if 'tracks' in album_data else 1
-
     info['genre'] = conv_list_format(artist_data.get('genres', []))
     info['performers'] = conv_list_format([item for item in credits.get('performers', []) if isinstance(item, str)])
     info['producers'] = conv_list_format([item for item in credits.get('producers', []) if isinstance(item, str)])
@@ -593,7 +573,7 @@ def spotify_get_track_metadata(token, item_id):
     info['isrc'] = track_data.get('tracks', [{}])[0].get('external_ids', {}).get('isrc', '')
     info['length'] = str(track_data.get('tracks', [{}])[0].get('duration_ms', ''))
     info['item_url'] = track_data.get('tracks', [{}])[0].get('external_urls', {}).get('spotify', '')
-    info['popularity'] = track_data.get('tracks', [{}])[0].get('popularity', '')  # unused
+    #info['popularity'] = track_data.get('tracks', [{}])[0].get('popularity', '')
     info['item_id'] = track_data.get('tracks', [{}])[0].get('id', '')
     info['is_playable'] = track_data.get('tracks', [{}])[0].get('is_playable', False)
 
@@ -611,6 +591,7 @@ def spotify_get_track_metadata(token, item_id):
         10: "A♯/B♭",
         11: "B"
     }
+
     if track_audio_data is not None:
         info['bpm'] = str(track_audio_data.get('tempo', ''))
         info['key'] = str(key_mapping.get(track_audio_data.get('key', ''), ''))
@@ -626,47 +607,68 @@ def spotify_get_track_metadata(token, item_id):
     return info
 
 
-def spotify_get_episode_metadata(token, episode_id_str):
-    logger.info(f"Get episode info for episode by id '{episode_id_str}'")
-
+def spotify_get_episode_metadata(token, episode_id):
+    logger.info(f"Get episode info for episode by id '{episode_id}'")
     headers = {"Authorization": f"Bearer {token}"}
+    episode_data = make_call(f"https://api.spotify.com/v1/episodes/{episode_id}", headers=headers)
+    show_episode_ids = spotify_get_show_episode_ids(token, episode_data.get('show', {}).get('id', ''))
+    # I believe audiobook ids start with a 7 but to verify you can use https://api.spotify.com/v1/audiobooks/{id}
+    # the endpoint could possibly be used to mark audiobooks in genre but it doesn't really provide any additional
+    # metadata compared to show_data beyond abridged and unabridged.
 
-    episode_data = make_call(f"https://api.spotify.com/v1/episodes/{episode_id_str}", headers=headers)
+    track_number = ''
+    for index, episode in enumerate(show_episode_ids):
+        if episode == episode_id:
+            track_number = index + 1
+            break
+
+    copyrights = []
+    for copyright in episode_data.get('show', {}).get('copyrights', []):
+        text = copyright.get('text', '')
+        copyrights.append(text)
+
     info = {}
-
-    languages = episode_data.get('languages', '')
-
-    info['album_name'] = episode_data.get("show", {}).get("name", "")
-    info['title'] = episode_data.get('name', "")
-    info['image_url'] = episode_data.get('images', [{}])[0].get('url', "")
-    info['release_year'] = episode_data.get('release_date', "")
-    info['total_tracks'] = episode_data.get('show', {}).get('total_episodes', 0)
-    info['artists'] = conv_list_format([episode_data.get('show', {}).get('publisher', "")])
-    info['album_artists'] = conv_list_format([episode_data.get('show', {}).get('publisher', "")])
-    info['language'] = conv_list_format(languages)
-    info['description'] = str(episode_data.get('description', "") if episode_data.get('description', "") != "" else "")
-    info['copyright'] = conv_list_format(episode_data.get('show', {}).get('copyrights', ''))
+    info['album_name'] = episode_data.get('show', {}).get('name', '')
+    info['title'] = episode_data.get('name', '')
+    info['image_url'] = episode_data.get('images', [{}])[0].get('url', '')
+    info['release_year'] = episode_data.get('release_date', '').split('-')[0]
+    info['track_number'] = track_number
+    # Not accurate
+    #info['total_tracks'] = episode_data.get('show', {}).get('total_episodes', 0)
+    info['total_tracks'] = len(show_episode_ids)
+    info['artists'] = conv_list_format([episode_data.get('show', {}).get('publisher', '')])
+    info['album_artists'] = conv_list_format([episode_data.get('show', {}).get('publisher', '')])
+    info['language'] = conv_list_format(episode_data.get('languages', []))
+    description = episode_data.get('description', '')
+    info['description'] = str(description if description else episode_data.get('show', {}).get('description', ""))
+    info['copyright'] = conv_list_format(copyrights)
     info['length'] = str(episode_data.get('duration_ms', ''))
     info['explicit'] = episode_data.get('explicit', '')
     info['is_playable'] = episode_data.get('is_playable', '')
-    info['item_url'] = episode_data.get('show', {}).get('external_urls', {}).get('spotify', '')
+    info['item_url'] = episode_data.get('external_urls', {}).get('spotify', '')
+    info['item_id'] = episode_data.get('id', '')
 
     return info
 
 
-def spotify_get_show_episodes(token, show_id_str):
-    logger.info(f"Get episodes for show by id '{show_id_str}'")
+def spotify_get_show_episode_ids(token, show_id):
+    logger.info(f"Getting show episodes: {show_id}'")
     episodes = []
     offset = 0
     limit = 50
-    while True:
-        headers = {'Authorization': f'Bearer {token}'}
-        params = {'limit': limit, 'offset': offset}
-        resp = make_call(f'https://api.spotify.com/v1/shows/{show_id_str}/episodes', headers=headers, params=params)
-        offset += limit
-        for episode in resp["items"]:
-            episodes.append(episode["id"])
 
-        if len(resp['items']) < limit:
+    while True:
+        url = f'https://api.spotify.com/v1/shows/{show_id}/episodes?offset={offset}&limit={limit}'
+        headers = {'Authorization': f'Bearer {token}'}
+        resp = make_call(url, headers=headers)
+
+        offset += limit
+        episodes.extend(resp['items'])
+
+        if resp['total'] <= offset:
             break
-    return episodes
+
+    item_ids = []
+    for episode in episodes:
+        item_ids.append(episode['id'])
+    return item_ids

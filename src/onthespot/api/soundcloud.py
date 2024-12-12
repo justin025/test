@@ -15,13 +15,13 @@ def soundcloud_parse_url(url, token):
         params["client_id"] = token['client_id']
         params["app_version"] = token['app_version']
         params["app_locale"] = token['app_locale']
-        params["url"] = url
 
-        resp = requests.get(f"https://api-v2.soundcloud.com/resolve", headers=headers, params=params).json()
+        resp = make_call(f"https://api-v2.soundcloud.com/resolve?url={url}", headers=headers, params=params)
 
         item_id = str(resp["id"])
         item_type = resp["kind"]
         return item_type, item_id
+
 
 def soundcloud_login_user(account):
     try:
@@ -63,23 +63,12 @@ def soundcloud_login_user(account):
             assert client_id_match is not None
             client_id = client_id_match.group(1)
 
-            accounts = config.get('accounts')
-            # Remove public from list
-            accounts = [account for account in accounts if account["uuid"] != "public_soundcloud"]
-
-            new_user = {
-                "uuid": "public_soundcloud",
-                "service": "soundcloud",
-                "active": True,
-                "login": {
-                    "client_id": client_id,
-                    "app_version": app_version,
-                    "app_locale": "en",
-                }
-            }
-            accounts.insert(0, new_user)
-
-            config.set_('accounts', accounts)
+            cfg_copy = config.get('accounts').copy()
+            for account in cfg_copy:
+                if account["uuid"] == "public_soundcloud":
+                    account['login']['client_id'] = client_id
+                    account['login']['app_version'] = app_version
+            config.set_('accounts', cfg_copy)
             config.update()
 
             account_pool.append({
@@ -115,6 +104,7 @@ def soundcloud_login_user(account):
         })
         return False
 
+
 def soundcloud_add_account():
     cfg_copy = config.get('accounts').copy()
     new_user = {
@@ -131,12 +121,14 @@ def soundcloud_add_account():
     config.set_('accounts', cfg_copy)
     config.update()
 
+
 def soundcloud_get_token(parsing_index):
     accounts = config.get("accounts")
     client_id = accounts[parsing_index]['login']["client_id"]
     app_version = accounts[parsing_index]['login']["app_version"]
     app_locale = accounts[parsing_index]['login']["app_locale"]
     return {"client_id": client_id, "app_version": app_version, "app_locale": app_locale}
+
 
 def soundcloud_get_search_results(token, search_term, content_types):
     headers = {}
@@ -184,6 +176,7 @@ def soundcloud_get_search_results(token, search_term, content_types):
 
 
 def soundcloud_get_set_items(token, url):
+    logger.info(f"Getting set items for {url}")
     headers = {}
     headers["user-agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3865.90 Safari/537.36"
 
@@ -191,14 +184,13 @@ def soundcloud_get_set_items(token, url):
     params["client_id"] = token['client_id']
     params["app_version"] = token['app_version']
     params["app_locale"] = token['app_locale']
-    params["url"] = url
 
-    tracks = []
     try:
-        set_data = requests.get(f"https://api-v2.soundcloud.com/resolve", headers=headers, params=params).json()
+        set_data = make_call(f"https://api-v2.soundcloud.com/resolve?url={url}", headers=headers, params=params, skip_cache=True)
         return set_data
     except (TypeError, KeyError):
         logger.info(f"Failed to parse tracks for set: {url}")
+
 
 def soundcloud_get_track_metadata(token, item_id):
     headers = {}
@@ -211,16 +203,13 @@ def soundcloud_get_track_metadata(token, item_id):
 
     track_data = make_call(f"https://api-v2.soundcloud.com/tracks/{item_id}", headers=headers, params=params)
     track_file = requests.get(track_data["media"]["transcodings"][0]["url"], headers=headers, params=params).json()
-    track_webpage = requests.get(f"{track_data['permalink_url']}/albums").text
+    track_webpage = make_call(f"{track_data['permalink_url']}/albums", text=True)
     # Parse album webpage
     start_index = track_webpage.find('<h2>Appears in albums</h2>')
     if start_index != -1:
         album_href = re.search(r'href="([^"]*)"', track_webpage[start_index:])
         if album_href:
-            params["url"] = f"https://soundcloud.com{album_href.group(1)}"
-            album_data = requests.get(f"https://api-v2.soundcloud.com/resolve", headers=headers, params=params).json()
-
-    info = {}
+            album_data = make_call(f"https://api-v2.soundcloud.com/resolve?url=https://soundcloud.com{album_href.group(1)}", headers=headers, params=params)
 
     # Many soundcloud songs are missing publisher metadata, parse if exists.
 
@@ -266,6 +255,7 @@ def soundcloud_get_track_metadata(token, item_id):
         copyright_list = ''
     copyright_data = conv_list_format(copyright_list)
 
+    info = {}
     info['image_url'] = track_data.get("artwork_url", "")
     info['description'] = str(track_data.get("description", ""))
     info['genre'] = conv_list_format([track_data.get('genre', [])])
@@ -291,5 +281,6 @@ def soundcloud_get_track_metadata(token, item_id):
     info['explicit'] = publisher_metadata.get('explicit', False) if publisher_metadata else False
     info['copyright'] = copyright_data
     info['is_playable'] = track_data.get('streamable', '')
+    info['item_id'] = track_data.get('id', '')
 
     return info
