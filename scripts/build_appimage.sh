@@ -58,9 +58,9 @@ cp $(ldd $(which ffplay) | grep "=> /" | awk '{print $3}' | xargs -I {} cp {} ..
 #cp /lib/x86_64-linux-gnu/libssl.so.1.1 ../OnTheSpot.AppDir/usr/lib/
 #cp /lib/x86_64-linux-gnu/libz.so.1 ../OnTheSpot.AppDir/usr/lib/
 #cp /usr/lib/x86_64-linux-gnu/libffi.so.7 ../OnTheSpot.AppDir/usr/lib/
-cp /usr/lib/x86_64-linux-gnu/libxcb-cursor.so* OnTheSpot.AppDir/usr/lib
-cp /usr/lib/x86_64-linux-gnu/libxcb-xinerama.so* OnTheSpot.AppDir/usr/lib
-cp /usr/lib/x86_64-linux-gnu/libxcb.so* OnTheSpot.AppDir/usr/lib
+cp /usr/lib/x86_64-linux-gnu/libxcb-cursor.so* ../OnTheSpot.AppDir/usr/lib
+cp /usr/lib/x86_64-linux-gnu/libxcb-xinerama.so* ../OnTheSpot.AppDir/usr/lib
+cp /usr/lib/x86_64-linux-gnu/libxcb.so* ../OnTheSpot.AppDir/usr/lib
 
 echo " => Build OnTheSpot AppImage"
 cd ..
